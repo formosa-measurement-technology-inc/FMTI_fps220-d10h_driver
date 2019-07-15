@@ -34,8 +34,8 @@
 
 #include "fps220_d10h.h"
 
-extern volatile uint32_t TMR0_Ticks;
-extern volatile uint32_t fps220_update_rdy;
+volatile uint32_t TMR0_Ticks;
+volatile uint32_t fps220_update_rdy;
 
 static void fps220_us_delay(uint32_t us);
 #ifdef SPI
@@ -172,28 +172,6 @@ static uint8_t fps220_i2c_readblock(uint8_t reg_addr, uint32_t cnt, uint8_t *reg
 	return status;
 }
 #endif
-
-#ifdef GPIO_I2C
-static uint8_t fps220_i2c_writeblock(uint8_t reg_addr, uint32_t cnt, const uint8_t *reg_data)
-{
-	int8_t status;
-	uint32_t cnt_write;
-	cnt_write = gpio_i2c_writeBlock(FPS220_I2C_SLAVE_ADDR, reg_addr, \
-	                                cnt, reg_data);
-	status = (cnt_write > 0) ?  0 : -1;
-	return status;
-}
-static uint8_t fps220_i2c_readblock(uint8_t reg_addr, uint32_t cnt, uint8_t *reg_data)
-{
-	int8_t status;
-	uint32_t cnt_read;
-	cnt_read = gpio_i2c_readBlock(FPS220_I2C_SLAVE_ADDR, reg_addr, \
-	                              cnt, reg_data);
-	status = (cnt_read > 0) ?  0 : -1;
-	return status;
-}
-#endif
-
 /**
  * @brief      { API for fps220 delay }
  *
@@ -215,6 +193,7 @@ static void fps220_us_delay(uint32_t us)
 int8_t fps220_init(void)
 {
 	int32_t err;
+	uint8_t data_buf;
 
 #ifdef SPI
 	fps220_barom.bus_write = fps220_spi_writeblock;
@@ -225,48 +204,71 @@ int8_t fps220_init(void)
 #endif
 	fps220_barom.delay_usec = fps220_us_delay;
 
-	/* The minimum start up time of fps220 is 15ms */
-	barom->delay_usec(1000 * 15);
+	/* The minimum start up time of fps220 is 25ms */
+	barom->delay_usec(1000 * 25);
 
 	err = fps220_chipid_check(barom);
 	if (err) {
 		err = -1;
 		goto err_chip_id_chk;
+	} else {
+#ifdef DEBUG_FPS220
+		printf("%s:fps220_chipid_check() passed!\n", __func__);
+#endif
 	}
 
 	err = fps220_version_identification(barom);
 	if (err) {
 		err = -2;
 		goto err_version_identification;
+	} else {
+#ifdef DEBUG_FPS220
+		printf("%s:fps220_version_identification() passed!\n", __func__);
+#endif
 	}
 
 	err = fps220_read_store_otp_data(barom);
 	if (err) {
 		err = -3;
 		goto err_read_otp;
+	} else {
+#ifdef DEBUG_FPS220
+		printf("%s:fps220_read_store_otp_data() passed!\n", __func__);
+#endif
 	}
-	
+	err = 0;
+
 	fps220_set_oversampling_rate(barom, OVERSAMPLING_RATE_DEFAULT);
-
-err_chip_id_chk:
-err_version_identification:
-err_read_otp:
-
+	/* Setting the P_CONFIG_REG_GAIN */
+#define P_CONFIG_REG_GAIN_SETTING FPS220_P_CONFIG_REG_GAIN_X16
+	barom->bus_read(FPS220_P_CONFIG_REG, sizeof(uint8_t), &data_buf);
+	data_buf &= ~(FPS220_P_CONFIG_REG_GAIN_MAK);
+	data_buf |= P_CONFIG_REG_GAIN_SETTING;
+	barom->bus_write(FPS220_P_CONFIG_REG, sizeof(uint8_t), &data_buf);
 #ifdef DEBUG_FPS220
-	printf("fps220_init; fps220_ID:%#x,err:%d\n", fps220_barom.chip_id, err);
-#endif//DEBUG_FPS220
-	if (err != 0) {
-#ifdef DEBUG_FPS220
-	printf("fps220_init failed!\n");
-#endif//DEBUG_FPS220
-        return -1;
-	}else
-    {
+	printf("%s:Setting of FPS220_P_CONFIG_REG_GAIN: %#x\n", __func__, P_CONFIG_REG_GAIN_SETTING);
+#endif
+
 #ifdef DEBUG_FPS220
 	printf("fps220_init succeeded!\n");
-#endif//DEBUG_FPS220	
-        return err;
-    }
+#endif
+    return err;
+
+err_chip_id_chk:
+#ifdef DEBUG_FPS220
+	printf("%s:fps220_init() failed!; fps220_ID:%#x,err:%d\n", __func__, fps220_barom.chip_id, err);
+#endif
+	return err;
+err_version_identification:
+#ifdef DEBUG_FPS220
+	printf("%s:fps220_init() failed!; fps220 version:%#x,err:%d\n", __func__, fps220_barom.hw_ver, err);
+#endif
+	return err;
+err_read_otp:
+#ifdef DEBUG_FPS220
+	printf("%s:fps220_init() failed!; fps220 otp reading failed!,err:%d\n", __func__, err);
+#endif
+	return err;
 }
 
 int32_t fps220_read_raw_t(void)
@@ -351,8 +353,8 @@ static int fps220_get_raw_temperature(struct fps220_data *barom)
 	barom->raw_temperature = (buf[0] * 256 * 256) + (buf[1] * 256) + buf[2];
 
 #ifdef DEBUG_FPS220
-	printf("%s: uncompensated temperature: %d\n", FPS220_NAME, barom->raw_temperature);
-#endif//DEBUG_FPS220
+	printf("%s: uncompensated temperature: %d\n", DEVICE_NAME, barom->raw_temperature);
+#endif
 	return err;
 }
 /**
@@ -392,8 +394,8 @@ static int32_t fps220_get_raw_pressure(struct fps220_data *barom)
 	barom->raw_pressure = (buf[0] * 256 * 256) + (buf[1] * 256) + buf[2];
 
 #ifdef DEBUG_FPS220
-	printf("%s: uncompensated pressure:  %d\n", FPS220_NAME, barom->raw_pressure);
-#endif//DEBUG_FPS220
+	printf("%s: uncompensated pressure:  %d\n", DEVICE_NAME, barom->raw_pressure);
+#endif
 
 	return err;
 }
@@ -406,11 +408,10 @@ static int32_t fps220_get_raw_pressure(struct fps220_data *barom)
  */
 static int32_t fps220_read_store_otp_data(struct fps220_data *barom)
 {
-	uint8_t tmp[FPS220_CALIBRATION_DATA_LENGTH] = {0};
-	uint16_t R[10] = {0};
-	int32_t status;
-	//uint8_t i;
 	struct fps220_calibration_data *cali = &(barom->calibration);
+	int32_t status;
+	uint16_t R[10] = {0};
+	uint8_t tmp[FPS220_CALIBRATION_DATA_LENGTH] = {0};	
 
 	status = barom->bus_read(FPS220_CALIBRATION_DATA_START0,
 	                         (FPS220_CALIBRATION_DATA_LENGTH - 2) * sizeof(uint8_t),
@@ -424,8 +425,8 @@ static int32_t fps220_read_store_otp_data(struct fps220_data *barom)
 	status = barom->bus_read(FPS220_CALIBRATION_DATA_START2, sizeof(uint8_t), (uint8_t *)tmp + 19);
 	if (status < 0)
 		goto exit;
-
-	R[0] = (tmp[0] << 8 | tmp[1]); //read OTP data here
+	/* Read OTP data here */
+	R[0] = (tmp[0] << 8 | tmp[1]);
 	R[1] = (tmp[2] << 8 | tmp[3]);
 	R[2] = (tmp[4] << 8 | tmp[5]);
 	R[3] = (tmp[6] << 8 | tmp[7]);
@@ -460,30 +461,30 @@ static int32_t fps220_read_store_otp_data(struct fps220_data *barom)
 	};
 
 #ifdef DEBUG_FPS220
-	printf("%s: R0= %#x\n", FPS220_NAME, R[0]);
-	printf("%s: R1= %#x\n", FPS220_NAME, R[1]);
-	printf("%s: R2= %#x\n", FPS220_NAME, R[2]);
-	printf("%s: R3= %#x\n", FPS220_NAME, R[3]);
-	printf("%s: R4= %#x\n", FPS220_NAME, R[4]);
-	printf("%s: R5= %#x\n", FPS220_NAME, R[5]);
-	printf("%s: R6= %#x\n", FPS220_NAME, R[6]);
-	printf("%s: R7= %#x\n", FPS220_NAME, R[7]);
-	printf("%s: R8= %#x\n", FPS220_NAME, R[8]);
-	printf("%s: R9= %#x\n", FPS220_NAME, R[9]);
-	printf("%s: C0= %d\n", FPS220_NAME, cali->C0);
-	printf("%s: C1= %d\n", FPS220_NAME, cali->C1);
-	printf("%s: C2= %d\n", FPS220_NAME, cali->C2);
-	printf("%s: C3= %d\n", FPS220_NAME, cali->C3);
-	printf("%s: C4= %d\n", FPS220_NAME, cali->C4);
-	printf("%s: C5= %d\n", FPS220_NAME, cali->C5);
-	printf("%s: C6= %d\n", FPS220_NAME, cali->C6);
-	printf("%s: C7= %d\n", FPS220_NAME, cali->C7);
-	printf("%s: C8= %d\n", FPS220_NAME, cali->C8);
-	printf("%s: C9= %d\n", FPS220_NAME, cali->C9);
-	printf("%s: C10= %d\n", FPS220_NAME, cali->C10);
-	printf("%s: C11= %d\n", FPS220_NAME, cali->C11);
-	printf("%s: C12= %d\n", FPS220_NAME, cali->C12);
-#endif//DEBUG_FPS220
+	printf("%s: R0= %#x\n", DEVICE_NAME, R[0]);
+	printf("%s: R1= %#x\n", DEVICE_NAME, R[1]);
+	printf("%s: R2= %#x\n", DEVICE_NAME, R[2]);
+	printf("%s: R3= %#x\n", DEVICE_NAME, R[3]);
+	printf("%s: R4= %#x\n", DEVICE_NAME, R[4]);
+	printf("%s: R5= %#x\n", DEVICE_NAME, R[5]);
+	printf("%s: R6= %#x\n", DEVICE_NAME, R[6]);
+	printf("%s: R7= %#x\n", DEVICE_NAME, R[7]);
+	printf("%s: R8= %#x\n", DEVICE_NAME, R[8]);
+	printf("%s: R9= %#x\n", DEVICE_NAME, R[9]);
+	printf("%s: C0= %d\n", DEVICE_NAME, cali->C0);
+	printf("%s: C1= %d\n", DEVICE_NAME, cali->C1);
+	printf("%s: C2= %d\n", DEVICE_NAME, cali->C2);
+	printf("%s: C3= %d\n", DEVICE_NAME, cali->C3);
+	printf("%s: C4= %d\n", DEVICE_NAME, cali->C4);
+	printf("%s: C5= %d\n", DEVICE_NAME, cali->C5);
+	printf("%s: C6= %d\n", DEVICE_NAME, cali->C6);
+	printf("%s: C7= %d\n", DEVICE_NAME, cali->C7);
+	printf("%s: C8= %d\n", DEVICE_NAME, cali->C8);
+	printf("%s: C9= %d\n", DEVICE_NAME, cali->C9);
+	printf("%s: C10= %d\n", DEVICE_NAME, cali->C10);
+	printf("%s: C11= %d\n", DEVICE_NAME, cali->C11);
+	printf("%s: C12= %d\n", DEVICE_NAME, cali->C12);
+#endif
 exit:
 	return status;
 }
@@ -497,47 +498,47 @@ exit:
  */
 static int fps220_version_identification(struct fps220_data *barom)
 {
-	int err;
+	int32_t err;
 	uint8_t buf[2] = {0};
 	uint8_t version = 0;
 	uint8_t bus_wr_data;
 
 	bus_wr_data = FPS220_SOFTRESET_CMD;
 	barom->bus_write(FPS220_SOFTRESET_REG, sizeof(uint8_t), &bus_wr_data);
-	barom->delay_usec(1000 * 15); /* The minimum start up time of fps220 is
-15ms */
+	/* The minimum start up time of fps220 is 25ms */
+    barom->delay_usec(1000 * 25); 
 	err = barom->bus_read(FPS220_TAKE_MEAS_REG, sizeof(uint8_t), buf);
 	err = barom->bus_read(FPS220_VERSION_REG, sizeof(uint8_t), buf + 1);
 
 	version = ((buf[0] & 0xC0) >> 6) | ((buf[1] & 0x70) >> 2);
 #ifdef DEBUG_FPS220
-	printf("%s: The value of version= %#x\n", FPS220_NAME, version);
-#endif//DEBUG_FPS220
+	printf("%s: The value of version: %#x\n", __func__, version);
+#endif
 
 	switch (version)	{
 	case hw_ver_b0:
 		barom->hw_ver = hw_ver_b0;
 #ifdef DEBUG_FPS220
-		printf("%s: The version of sensor is B0.\n", FPS220_NAME);
-#endif//DEBUG_FPS220		
+		printf("%s: The version of sensor is B0.\n", __func__);
+#endif		
 		break;
 	case hw_ver_b1:
 		barom->hw_ver = hw_ver_b1;
 #ifdef DEBUG_FPS220
-		printf("%s: The version of sensor is B1.\n", FPS220_NAME);
-#endif//DEBUG_FPS220		
+        printf("%s: The version of sensor is B1.\n", __func__);
+#endif		
 		break;
 	case hw_ver_b2:
 		barom->hw_ver = hw_ver_b2;
 #ifdef DEBUG_FPS220
-		printf("%s: The version of sensor is B2.\n", FPS220_NAME);
-#endif//DEBUG_FPS220
+		printf("%s: The version of sensor is B2.\n", __func__);
+#endif
 		break;
 	default:
 		barom->hw_ver = hw_ver_unknown;
 #ifdef DEBUG_FPS220
-		printf("%s: The version of sensor is unknown.\n", FPS220_NAME);
-#endif//DEBUG_FPS220
+		printf("%s: The version of sensor is unknown.\n", __func__);
+#endif
 		break;
 	}
 	return err;
@@ -551,7 +552,7 @@ static int32_t fps220_set_oversampling_rate(struct fps220_data *barom
 	barom->oversampling_rate = osr_setting;
 #ifdef DEBUG_FPS220
 	printf("Setting of oversampling_rate:%#x\r\n", barom->oversampling_rate);
-#endif//DEBUG_FPS220			
+#endif			
 
 	/* Setting conversion time for pressure measurement */
 	switch (osr_setting) {
@@ -582,10 +583,10 @@ static int32_t fps220_set_oversampling_rate(struct fps220_data *barom
 		barom->bus_read(0xA6, sizeof(uint8_t), &data_buf);
 #ifdef DEBUG_FPS220
 		printf("reg_0xA6:%#x\n\r", data_buf);
-#endif//DEBUG_FPS220
+#endif
 		break;
 	}
-	/* Setting covversion time for temperature measurement */
+	/* Setting conversion time for temperature measurement */
 	barom->cnvTime_temp = FPS220_CONVERSION_usTIME_OSR1024;
 
 	return 0;
@@ -597,8 +598,8 @@ static int32_t fps220_chipid_check(struct fps220_data *barom)
 
 	err = barom->bus_read(FPS220_CHIP_ID_REG, sizeof(uint8_t), &chip_id_read);
 #ifdef DEBUG_FPS220
-	printf("%s: chip_id reading is %#x \n", FPS220_NAME, chip_id_read);
-#endif//DEBUG_FPS220
+	printf("%s: chip_id reading is %#x \n", __func__, chip_id_read);
+#endif
 
 	if (chip_id_read != FPS220_CHIP_ID) {
 		err = -1;
@@ -627,7 +628,7 @@ void fps220_update_data(void)
 	{
 #ifdef DEBUG_FPS220
 		printf("start t_measurement\r\n");
-#endif//DEBUG_FPS220			
+#endif			
 		fps220_startMeasure_temp(barom);
 		t_start_flag = 1;
 		tick_last = TMR0_Ticks;
@@ -636,7 +637,7 @@ void fps220_update_data(void)
 	{
 #ifdef DEBUG_FPS220
 		printf("start p_measurement\r\n");
-#endif//DEBUG_FPS220			
+#endif			
 		fps220_get_raw_temperature(barom);
 		fps220_startMeasure_press(barom);
 		p_start_flag = 1;
@@ -646,7 +647,7 @@ void fps220_update_data(void)
 	{
 #ifdef DEBUG_FPS220
 		printf("read pressure\r\n");
-#endif//DEBUG_FPS220			
+#endif			
 		fps220_get_raw_pressure(barom);
 		t_start_flag = 0;
 		p_start_flag = 0;
@@ -659,7 +660,7 @@ void fps220_update_data(void)
 	printf("tick_current:%d\r\n", tick_current);
 	printf("tick_last:%d\r\n", tick_last);
 	printf("FPS220 is updating %d\r\n", TMR0_Ticks);
-#endif//DEBUG_FPS220		
+#endif		
 	return ;
 }
 /**
@@ -726,8 +727,8 @@ int fps220_calculation(struct fps220_data *barom)
 	barom->real_pressure = RP; //uint: 0.01 Pa
 
 #ifdef DEBUG_FPS220
-	printf("%s: calibrated pressure: %d\n", FPS220_NAME, RP);
-#endif//DEBUG_FPS220
+	printf("%s: calibrated pressure: %d\n", DEVICE_NAME, RP);
+#endif
 
 	return 0;
 }

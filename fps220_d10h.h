@@ -22,16 +22,15 @@
 
 #include <stdio.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <NUC123.h>
-#include "gpio_i2c.h"
+#include <NUC123.h> //MCU specific header files
 
+/* Data bus definition */
 #define I2C
-//#define GPIO_I2C
 //#define SPI
-#define FPS220_NAME     "fps220"
+
+#define DEVICE_NAME     "fps220-d10h"
 #define FPS220_CHIP_ID  0x42
-#define DEBUG_FPS220  //Enable debug mode
+//#define DEBUG_FPS220  //Enable debug mode
 
 /**
  * { I2C 7bit address for fps220 }
@@ -54,6 +53,17 @@
 #define FPS220_SOFTRESET_REG    0xe0
 #define FPS220_CHIP_ID_REG	  0x6b
 #define FPS220_VERSION_REG	  0xa5
+#define FPS220_P_CONFIG_REG	  0xa6
+#define FPS220_P_CONFIG_REG_GAIN_POS (3)
+#define FPS220_P_CONFIG_REG_GAIN_MAK (7 << FPS220_P_CONFIG_REG_GAIN_POS)
+#define FPS220_P_CONFIG_REG_GAIN_X1 (0 << FPS220_P_CONFIG_REG_GAIN_POS)
+#define FPS220_P_CONFIG_REG_GAIN_X2 (1 << FPS220_P_CONFIG_REG_GAIN_POS)
+#define FPS220_P_CONFIG_REG_GAIN_X4 (2 << FPS220_P_CONFIG_REG_GAIN_POS)
+#define FPS220_P_CONFIG_REG_GAIN_X8 (3 << FPS220_P_CONFIG_REG_GAIN_POS)
+#define FPS220_P_CONFIG_REG_GAIN_X16 (4 << FPS220_P_CONFIG_REG_GAIN_POS)
+#define FPS220_P_CONFIG_REG_GAIN_X32 (5 << FPS220_P_CONFIG_REG_GAIN_POS)
+#define FPS220_P_CONFIG_REG_GAIN_X64 (6 << FPS220_P_CONFIG_REG_GAIN_POS)
+#define FPS220_P_CONFIG_REG_GAIN_X128 (7 << FPS220_P_CONFIG_REG_GAIN_POS)
 
 /* CMD list */
 #define FPS220_MEAS_TEMP		        0x2e /* 2.5ms wait for measurement */
@@ -84,6 +94,9 @@
 #define FPS220_SPI_3BYTE 0x40
 #define FPS220_SPI_4BYTE 0x60
 #endif
+
+extern volatile uint32_t TMR0_Ticks;
+extern volatile uint32_t fps220_update_rdy;
 
 struct fps220_calibration_data {
 	int32_t C0, C1, C2, C3, C4, C5, C6, C7, \
